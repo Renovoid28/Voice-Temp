@@ -1,82 +1,36 @@
 import discord
 from discord.ext import commands
+from keep_alive import keep_alive
 import os
-import json
-from flask import Flask
-from threading import Thread
+import time
 
-# ========== Keep Alive Web Server ==========
-app = Flask('')
-
-@app.route('/')
-def home():
-    return "Bot is alive!"
-
-def run_web():
-    app.run(host='0.0.0.0', port=8080)
-
-def keep_alive():
-    t = Thread(target=run_web)
-    t.start()
-
-# ========== Bot Setup ==========
-intents = discord.Intents.default()
-intents.voice_states = True
-intents.guilds = True
-intents.members = True
-
+intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-TRIGGER_CHANNEL_ID = int(os.getenv("TRIGGER_ID"))
-VOICE_CATEGORY_ID = int(os.getenv("CATEGORY_ID"))
-DATA_FILE = "vc_data.json"
+TRIGGER_ID = int(os.getenv("TRIGGER_ID"))
+CATEGORY_ID = int(os.getenv("CATEGORY_ID"))
 
-# ========== Load & Save Data ==========
-def load_data():
-    if os.path.exists(DATA_FILE):
-        with open(DATA_FILE, "r") as f:
-            return json.load(f)
-    return {}
-
-def save_data(data):
-    with open(DATA_FILE, "w") as f:
-        json.dump(data, f, indent=4)
-
-user_temp_channels = load_data()
-
-# ========== Events ==========
 @bot.event
 async def on_ready():
-    print(f"Bot aktif sebagai {bot.user}")
+    print(f"Bot is ready as {bot.user}")
 
 @bot.event
 async def on_voice_state_update(member, before, after):
-    if after.channel and after.channel.id == TRIGGER_CHANNEL_ID:
-        guild = after.channel.guild
-        category = discord.utils.get(guild.categories, id=VOICE_CATEGORY_ID)
+    if after.channel and after.channel.id == TRIGGER_ID:
+        guild = member.guild
+        category = discord.utils.get(guild.categories, id=CATEGORY_ID)
+        channel = await guild.create_voice_channel(name=f"{member.name}'s room", category=category)
+        await member.move_to(channel)
 
-        new_channel = await guild.create_voice_channel(
-            name=f"{member.display_name}",
-            category=category
-        )
-        await member.move_to(new_channel)
+        def check(x, y, z): return len(channel.members) == 0
+        await bot.wait_for('voice_state_update', check=check)
+        await channel.delete()
 
-        user_temp_channels[str(member.id)] = {
-            "channel_id": new_channel.id,
-            "owner_id": member.id,
-            "channel_name": new_channel.name
-        }
-        save_data(user_temp_channels)
-
-    if before.channel:
-        for uid, info in list(user_temp_channels.items()):
-            if info["channel_id"] == before.channel.id:
-                if len(before.channel.members) == 0:
-                    await before.channel.delete()
-                    del user_temp_channels[uid]
-                    save_data(user_temp_channels)
-                    break
-
-# ========== Run ==========
 keep_alive()
-bot.run(os.getenv("TOKEN"))
+
+while True:
+    try:
+        bot.run(os.getenv("TOKEN"))
+    except Exception as e:
+        print(f"Bot error: {e}")
+        time.sleep(5)
